@@ -1,0 +1,140 @@
+##Query for Enron Dataset
+
+##Create Table for Enron Data Set
+CREATE TABLE IF NOT EXISTS emails (eid String,timestamp String, mailfrom String,mailto String,cc String,subject String,context String)
+	comment 'enron-email-data'
+	ROW FORMAT DELIMITED	
+	FIELDS TERMINATED BY '\011' 
+	STORED AS TEXTFILE;
+
+##LoadData
+load data local inpath'enron/enron.tab' overwrite into table emails;
+
+
+#1. Top 40 Correspondence:
+
+select * from 
+	(select mailto as mail, count(*) as count from emails where mailto like '%@%.com' group by mailto 
+		UNION ALL 
+	select mailfrom as mail, count(*) as count from emails where mailfrom like '%@%.com' group by mailfrom)
+a order by count desc limit 40;
+
+#2. Maximum mails sent by:
+
+select mailfrom, count(*) as count 
+	from emails 
+	where mailfrom like '%@%.com' 
+	group by mailfrom 
+	order by count desc 
+	limit 10;
+
+#3. Maximum mails recieved by:
+
+select mailto, count(*) as count 
+	from emails 
+	where mailto like '%@%.com' 
+	group by mailto 
+	order by count desc 
+	limit 10;
+
+#4. Most Important Subject words in Year 2001
+
+SELECT explode(ngrams(sentences(lower(a.subject)), 1, 10)) as abc 
+	FROM 
+		(select subject 
+			from emails 
+			where timestamp like '%2001%') a;
+
+#5. Number of mails exchanged per month in Year 2000 and 2001;
+
+select count(*),sentences(e.timestamp)[0][2],m.mid as smid,sentences(e.timestamp)[0][3] as syear 
+	from emails e JOIN monthid m 
+	ON (m.mon=sentences(e.timestamp)[0][2]) 
+	where e.timestamp like '%200%'  
+	group by sentences(e.timestamp)[0][2],m.mid,sentences(e.timestamp)[0][3] 
+	order by syear,smid ;
+
+#6. Top senders in Year 2001
+
+select mailfrom, sentences(timestamp)[0][2] , count(*) as count 
+	from emails 
+	where mailfrom like '%@%.com' 
+	and sentences(timestamp)[0][3] ='2001' 
+	group by mailfrom,sentences(timestamp)[0][2] 
+	order by count desc 
+	limit 10;
+
+##Query for NetFlix Data set
+
+#Create movie_titles Table
+CREATE TABLE IF NOT EXISTS movie_titles (mid Int , yearOfRelease Int, title String) 
+     COMMENT 'movie-title-data'
+     ROW FORMAT DELIMITED  
+     FIELDS TERMINATED BY ',' 
+     STORED AS TEXTFILE;
+
+#Create movie_ratings Table
+CREATE TABLE IF NOT EXISTS movie_ratings (mid Int , custormer_id Int, rating Int,date String) 
+     COMMENT 'movie-ratings-data'
+     ROW FORMAT DELIMITED  
+     FIELDS TERMINATED BY ',' 
+     STORED AS TEXTFILE;
+
+##LoadData
+load data inpath 'netflix/movie_titles.csv' overwrite into table movie_titles
+
+load data inpath 'netflix/movie_ratings.csv' overwrite into table movie_ratings
+
+#1. Top 25 Movies of all times
+
+select t.title,a.rating 
+	from movie_titles t JOIN 
+		(select  avg(mr.rating) as rating,mt.mid as mid 
+			from movie_titles mt JOIN movie_ratings mr 
+				ON mr.mid=mt.mid group by mt.mid) a 
+		ON t.mid=a.mid 
+	order by a.rating 
+	limit 25;
+
+#2. Number of Movies per month per year 
+
+select count(distinct custormer_id),month(date) as m,year(date) as y 
+	from movie_ratings 
+	group by year(date),month(date) 
+	order by y,m;
+
+#3. Most Similar Movies
+
+select i2.title1 as title1,mt.title as title2,i2.count from movie_title mt2 JOIN 
+	(select mt.title as title1,i1.mid2 as mid,i1.count as count 
+		from 
+			(select mr1.mid as mid1,mr2.mid as mid2,count(1) as count 
+				from movie_ratings mr1 JOIN movie_ratings mr2 
+				on (mr1.custormer_id = mr2.custormer_id) 
+				where mr1.rating = mr2.rating 
+				and mr1.mid != mr2.mid 
+				group by mr1.mid,mr2.mid)
+			 i1 JOIN movie_titles mt1
+			 ON (i1.mid1 = mt1.mid)) 
+	i2
+	ON(i2.mid = mt.mid)
+	group by title1,title2
+	order by i2.count desc
+	limit 20; 
+
+
+#4. Worst movies:
+select count(1) as num1, mt.title, mt.yearofrelease from movie_titles mt JOIN movie_ratings mr ON
+(mt.mid = mr.mid) AND (mr.rating BETWEEN 1 AND 2) AND
+(mt.yearofrelease BETWEEN "1950" AND "2000")
+GROUP BY mt.title, mt.yearofrelease
+ORDER BY num1 DESC
+limit 10;
+
+#5. Top 100 Popular Movies
+
+select title from movie_titles mt join 
+(select mid from (select mid,count(custormer_id) as c_custid from movie_ratings 
+group by mid order by c_custid desc limit 100) a ) n 
+where n.mid = mt.mid;
+
